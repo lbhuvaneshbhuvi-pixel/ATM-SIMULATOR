@@ -1,0 +1,92 @@
+rules_version = '2';
+
+/**
+ * ATM Simulator Security Rules
+ *
+ * Core Philosophy:
+ * This ruleset implements a strict Path-Based Ownership model. All financial data (Accounts and Transactions) 
+ * is logically and physically nested under a user's unique identifier (/users/{userId}). 
+ *
+ * Data Structure:
+ * - /users/{userId}/accounts/{accountId}: Represents a specific bank account owned by the user.
+ * - /users/{userId}/accounts/{accountId}/transactions/{transactionId}: Represents a specific financial activity within an account.
+ *
+ * Key Security Decisions:
+ * 1. Path-Based Authorization: Authorization is derived directly from the document path. If a user's UID 
+ *    matches the {userId} wildcard in the path, they are granted access.
+ * 2. Authorization Independence: This design avoids the use of `get()` or `exists()` calls, ensuring 
+ *    rules remain high-performance and cost-effective.
+ * 3. Relational Integrity: During creation, rules enforce that internal ID fields (e.g., accountId, transactionId) 
+ *    match the Firestore document IDs to ensure data consistency.
+ * 4. Immutability: Critical relational fields, such as the owner and account IDs, are made immutable after creation.
+ * 5. Prototyping Flexibility: While authorization is strictly enforced, general data types and non-relational 
+ *    fields (like balance or description) are not validated to allow for rapid iteration.
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper Functions ---
+
+    /** @description Checks if the request is from an authenticated user. */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /** @description Checks if the authenticated user's UID matches the provided userId. */
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /** @description Verifies ownership and ensures the document exists for state-changing operations. */
+    function isExistingOwner(userId) {
+      return isOwner(userId) && resource != null;
+    }
+
+    // --- Collection Rules ---
+
+    /**
+     * @description Rules for the Account entity. Restricts access to the account owner.
+     * @path /users/{userId}/accounts/{accountId}
+     * @allow (get) If auth.uid matches userId.
+     * @deny (list) If auth.uid does not match userId.
+     * @principle Restricts access to a user's own data tree and validates path consistency.
+     */
+    match /users/{userId}/accounts/{accountId} {
+      allow get, list: if isOwner(userId);
+      
+      // On create, ensure the internal 'id' field matches the document ID in the path.
+      allow create: if isOwner(userId) && request.resource.data.id == accountId;
+      
+      // On update, ensure the account ID remains immutable and the document exists.
+      allow update: if isExistingOwner(userId) && request.resource.data.id == resource.data.id;
+      
+      allow delete: if isExistingOwner(userId);
+
+      /**
+       * @description Rules for Transactions nested under a specific Account.
+       * @path /users/{userId}/accounts/{accountId}/transactions/{transactionId}
+       * @allow (create) If auth.uid matches userId and the transaction's accountId matches the path.
+       * @deny (update) If the user attempts to change the accountId of an existing transaction.
+       * @principle Enforces strict ownership and hierarchical integrity without cross-document lookups.
+       */
+      match /transactions/{transactionId} {
+        allow get, list: if isOwner(userId);
+
+        // Enforce that the transaction is linked to the correct account and user via the path.
+        allow create: if isOwner(userId) && request.resource.data.id == transactionId && request.resource.data.accountId == accountId;
+        
+        // Ensure that once a transaction is created, its identity and account association cannot change.
+        allow update: if isExistingOwner(userId) && request.resource.data.id == resource.data.id && request.resource.data.accountId == resource.data.accountId;
+        
+        allow delete: if isExistingOwner(userId);
+      }
+    }
+
+    // --- Default Deny ---
+    // Explicitly block any access to paths not defined above.
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
