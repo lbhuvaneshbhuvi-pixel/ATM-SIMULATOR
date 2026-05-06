@@ -1,0 +1,16 @@
+{
+  "placeholderImages": [
+    {
+      "id": "bank-building",
+      "description": "A modern glass bank headquarters building",
+      "imageUrl": "https://picsum.photos/seed/bank1/1200/800",
+      "imageHint": "modern bank building"
+    },
+    {
+      "id": "atm-card",
+      "description": "Close up of a premium banking card",
+      "imageUrl": "https://picsum.photos/seed/card1/600/400",
+      "imageHint": "credit card"
+    }
+  ]
+}

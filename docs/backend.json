@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "Account": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Account",
+      "type": "object",
+      "description": "Represents a user's bank account in the ATM simulator, holding the current balance.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Account entity."
+        },
+        "balance": {
+          "type": "number",
+          "description": "The current monetary balance of the account, in Indian Rupees (₹)."
+        }
+      },
+      "required": [
+        "id",
+        "balance"
+      ]
+    },
+    "Transaction": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Transaction",
+      "type": "object",
+      "description": "Records individual financial operations performed on an account, such as deposits or withdrawals.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Transaction entity."
+        },
+        "accountId": {
+          "type": "string",
+          "description": "Reference to the Account on which this transaction was performed. (Relationship: Account 1:N Transaction)"
+        },
+        "type": {
+          "type": "string",
+          "description": "The type of transaction (e.g., 'Deposit', 'Withdrawal')."
+        },
+        "amount": {
+          "type": "number",
+          "description": "The monetary amount involved in the transaction, in Indian Rupees (₹). For withdrawals, this is the amount withdrawn; for deposits, the amount deposited."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "The date and time when the transaction occurred.",
+          "format": "date-time"
+        },
+        "endingBalance": {
+          "type": "number",
+          "description": "The account balance immediately after this transaction was completed."
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "type",
+        "amount",
+        "timestamp",
+        "endingBalance"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}/accounts/{accountId}",
+        "definition": {
+          "entityName": "Account",
+          "schema": {
+            "$ref": "#/backend/entities/Account"
+          },
+          "description": "Stores the balance and unique identifier for a user's bank account. Access is restricted solely to the owning user whose UID matches `userId` in the path.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user who owns this account."
+            },
+            {
+              "name": "accountId",
+              "description": "The unique identifier for the specific bank account."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}/accounts/{accountId}/transactions/{transactionId}",
+        "definition": {
+          "entityName": "Transaction",
+          "schema": {
+            "$ref": "#/backend/entities/Transaction"
+          },
+          "description": "Records details of a financial transaction (deposit/withdrawal) for a specific account. The `accountId` field in the document is implicitly part of the path, providing robust authorization independence. Access is restricted to the owning user (`userId`) and the specified account (`accountId`).",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user who owns the account associated with this transaction."
+            },
+            {
+              "name": "accountId",
+              "description": "The unique identifier of the bank account where this transaction occurred."
+            },
+            {
+              "name": "transactionId",
+              "description": "The unique identifier for this specific financial transaction."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure is designed around strict user-ownership, following the Path-Based ownership model to ensure strong authorization independence and clarity. Each user's financial data (Accounts and Transactions) is nested directly under their unique user ID (`/users/{userId}`). This pattern makes security rules exceptionally straightforward, as authorization can be verified simply by matching `request.auth.uid` to the `{userId}` wildcard in the path. This approach completely eliminates the need for `get()` calls in security rules, fulfilling the CRITICAL Authorization Independence principle. For instance, an `Account` document at `/users/{userId}/accounts/{accountId}` can only be accessed by the user whose UID matches `{userId}`. Similarly, a `Transaction` document at `/users/{userId}/accounts/{accountId}/transactions/{transactionId}` is implicitly owned by `{userId}` and associated with `{accountId}`.\n\nThis structure directly supports QAPs (Queryable Authorization Patterns) because `list` operations on `/users/{userId}/accounts` or `/users/{userId}/accounts/{accountId}/transactions` will inherently only return data belonging to the authenticated user. There is no possibility of a user querying another user's data without explicitly knowing their `userId`, and even then, security rules would block access. The `accountId` within the `Transaction` document, while also present in the path, reinforces the explicit linkage and maintains data integrity without requiring cross-document lookups for authorization. Structural segregation ensures that all documents within a given subcollection (e.g., all documents in `/users/{userId}/accounts`) share the same security posture – they are exclusively accessible by the `userId` in the path. No denormalization of authorization fields (like 'members' maps) is needed for these entities because access is purely based on the owner's UID in the path, which is the most secure and performant method for private user data."
+  }
+}
